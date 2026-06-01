@@ -163,6 +163,7 @@ function imageLoaded() {
     if (imagesLoaded === 2) {
         loader.classList.add('hidden');
         rulesContainer.classList.remove('hidden');
+        updateLayout(); // Пересчитываем позицию зон после загрузки фона
     }
 }
 
@@ -201,6 +202,7 @@ let state = {
     wordQueue: [], 
     currentWord: null,
     hoverZone: null,
+    bgLayout: null, // Хранит физические координаты фона
     
     // Параметры мяча
     ball: {
@@ -296,28 +298,72 @@ function init() {
 function resize() {
     state.width = window.innerWidth;
     state.height = window.innerHeight;
-    canvas.width = state.width;
-    canvas.height = state.height;
-
-    // Подгоняем зону ворот: чтобы мишени не вылезали за штанги на фоновом изображении
-    state.goal.width = Math.min(state.width * 0.72, 800);
-    state.goal.height = Math.max(state.height * 0.35, 180); 
-    state.goal.x = (state.width - state.goal.width) / 2;
-    state.goal.y = state.height * 0.45; // Опустили варианты ответов ниже (было 0.30)
     
-    const gap = 8; // Отступ между зонами
+    // Поддержка Retina дисплеев для абсолютной четкости картинок
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = state.width * dpr;
+    canvas.height = state.height * dpr;
+    canvas.style.width = `${state.width}px`;
+    canvas.style.height = `${state.height}px`;
+    
+    ctx.scale(dpr, dpr);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    updateLayout();
+
+    if (!state.isRunning || state.ball.mode === 'idle') {
+        resetBall();
+    }
+}
+
+function updateLayout() {
+    if (!images.bg.complete || images.bg.naturalWidth === 0) {
+        // Запасной план, если фон еще грузится
+        state.goal.width = Math.min(state.width * 0.55, 600);
+        state.goal.height = Math.max(state.height * 0.2, 120); 
+        state.goal.x = (state.width - state.goal.width) / 2;
+        state.goal.y = state.height * 0.40;
+    } else {
+        // Динамический расчет: привязываем зоны строго к размерам отрисованной картинки!
+        const canvasRatio = state.width / state.height;
+        const imgRatio = images.bg.width / images.bg.height;
+        let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+
+        if (canvasRatio > imgRatio) {
+            drawWidth = state.width;
+            drawHeight = state.width / imgRatio;
+            offsetY = (state.height - drawHeight) / 2;
+        } else {
+            drawHeight = state.height;
+            drawWidth = state.height * imgRatio;
+            offsetX = (state.width - drawWidth) / 2;
+        }
+
+        state.bgLayout = { offsetX, offsetY, drawWidth, drawHeight };
+
+        // ИДЕАЛЬНАЯ ПОДГОНКА ПОД ВОРОТА
+        // Расширяем общую зону (до 48%), чтобы было куда раздвигать ответы
+        state.goal.width = drawWidth * 0.48;
+        // Высота зон (18% от высоты картинки)
+        state.goal.height = drawHeight * 0.18;
+        state.goal.x = offsetX + (drawWidth - state.goal.width) / 2;
+        
+        // Поднимаем вверх. (Было 0.82, стало 0.76 - поднимает зоны выше от низа картинки)
+        const bottomOfGoalNet = drawHeight * 0.76; 
+        state.goal.y = offsetY + bottomOfGoalNet - state.goal.height;
+    }
+    
+    // Увеличиваем отступ между зонами (отдаляем ответы друг от друга)
+    const gap = state.goal.width * 0.12; // Отступ теперь пропорционален и достаточно широкий
     const zoneW = (state.goal.width - gap * 2) / 3;
 
-    // Зоны: s, es, - (Теперь все с зеленой подсветкой)
+    // Зоны: s, es, - (Зеленая подсветка)
     state.goal.zones = [
         { id: 's', label: 's', x: state.goal.x, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' },
         { id: 'es', label: 'es', x: state.goal.x + zoneW + gap, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' },
         { id: '-', label: '—', x: state.goal.x + (zoneW + gap) * 2, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' }
     ];
-
-    if (!state.isRunning || state.ball.mode === 'idle') {
-        resetBall();
-    }
 }
 
 function startGame() {
@@ -401,8 +447,8 @@ function handlePointerDown(e) {
     const pos = getPointerPos(e);
     
     for (let zone of state.goal.zones) {
-        // Увеличили зону клика по вертикали, чтобы было удобнее бить по мячу
-        if (pos.x >= zone.x && pos.x <= zone.x + zone.w && pos.y < state.height * 0.85) {
+        // Ловим клики по всей нижней половине экрана для удобства на мобильных
+        if (pos.x >= zone.x && pos.x <= zone.x + zone.w && pos.y > state.height * 0.4) {
             shootBall(zone);
             return;
         }
@@ -412,7 +458,8 @@ function handlePointerDown(e) {
 function shootBall(zone) {
     playHitSound();
     state.ball.targetX = zone.x + zone.w / 2;
-    // Мяч целится в нижнюю часть ворот (снизу ответа)
+    // Мяч целится так, чтобы его НИЖНИЙ край касался низа зоны (газона)
+    // Учитываем перспективу: центр мяча должен быть выше нижнего края на величину радиуса
     state.ball.targetY = state.goal.y + state.goal.height - state.ball.baseRadius * 0.5; 
     state.ball.targetZone = zone;
     state.ball.mode = 'shooting';
@@ -510,25 +557,14 @@ function draw() {
 }
 
 function drawBackground() {
-    if (images.bg.complete && images.bg.naturalWidth > 0) {
-        const canvasRatio = canvas.width / canvas.height;
-        const imgRatio = images.bg.width / images.bg.height;
-        let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
-
-        if (canvasRatio > imgRatio) {
-            drawWidth = canvas.width;
-            drawHeight = canvas.width / imgRatio;
-            offsetY = (canvas.height - drawHeight) / 2;
-        } else {
-            drawHeight = canvas.height;
-            drawWidth = canvas.height * imgRatio;
-            offsetX = (canvas.width - drawWidth) / 2;
-        }
+    if (images.bg.complete && images.bg.naturalWidth > 0 && state.bgLayout) {
+        const { offsetX, offsetY, drawWidth, drawHeight } = state.bgLayout;
+        
         ctx.drawImage(images.bg, offsetX, offsetY, drawWidth, drawHeight);
         
         // Легкое затемнение
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, state.width, state.height);
     } else {
         ctx.fillStyle = '#064e3b';
         ctx.fillRect(0, 0, state.width, state.height);
