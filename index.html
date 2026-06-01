@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Английский Футбол 3D: Present Simple</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #064e3b; /* Запасной темно-зеленый цвет поля */
+            touch-action: none;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        
+        @keyframes popOut {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-animation {
+            animation: popOut 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes shieldBump {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        .shield-bump {
+            animation: shieldBump 0.3s ease-out;
+        }
+
+        #loader {
+            transition: opacity 0.5s ease;
+        }
+
+        .bg-glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="ui-layer px-2 md:px-4">
+        
+        <!-- Верхняя панель: Щиты со счетом -->
+        <div class="flex justify-between items-start w-full relative z-10 mt-2">
+            <!-- Левый щит: Верные ответы -->
+            <div id="shieldCorrectContainer" class="bg-gradient-to-b from-green-500 to-green-700 text-white rounded-2xl w-20 md:w-24 h-20 md:h-24 shadow-2xl flex flex-col items-center justify-center border-4 border-green-300 transform transition-transform interactive">
+                <span class="text-[10px] md:text-xs uppercase font-bold opacity-90 mb-1 drop-shadow">Goals</span>
+                <span class="text-3xl md:text-4xl font-black drop-shadow-md leading-none" id="scoreCorrect">0</span>
+            </div>
+
+            <!-- Правый щит: Ошибки -->
+            <div id="shieldIncorrectContainer" class="bg-gradient-to-b from-red-500 to-red-700 text-white rounded-2xl w-20 md:w-24 h-20 md:h-24 shadow-2xl flex flex-col items-center justify-center border-4 border-red-300 transform transition-transform interactive">
+                <span class="text-[10px] md:text-xs uppercase font-bold opacity-90 mb-1 drop-shadow">Misses</span>
+                <span class="text-3xl md:text-4xl font-black drop-shadow-md leading-none" id="scoreIncorrect">0</span>
+            </div>
+        </div>
+
+        <!-- Кнопка рестарта -->
+        <button id="btnRestart" class="absolute bottom-6 left-6 md:bottom-10 md:left-10 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-full p-4 shadow-xl interactive transition-transform active:scale-95 backdrop-blur-sm z-50">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+
+        <!-- Контейнер для фидбека -->
+        <div class="absolute top-[25%] md:top-[30%] left-0 w-full flex justify-center pointer-events-none z-20">
+            <div id="feedbackMessage" class="text-3xl md:text-5xl font-black opacity-0 scale-50 transition-all duration-300 drop-shadow-2xl text-center" style="text-shadow: 0 4px 6px rgba(0,0,0,0.5);">
+            </div>
+        </div>
+
+        <!-- Контейнер для слова (Перемещен наверх) -->
+        <div class="absolute top-[5%] md:top-[8%] left-0 w-full flex justify-center pointer-events-none z-20">
+            <div id="wordContainer" class="bg-slate-900/90 border-2 border-emerald-400/50 px-8 py-3 rounded-2xl shadow-2xl text-center transform transition-all flex items-center justify-center">
+                <h1 id="currentWord" class="text-2xl md:text-4xl font-sans font-black text-white tracking-wide drop-shadow-md transition-colors duration-300">He watch___ TV.</h1>
+            </div>
+        </div>
+    </div>
+
+    <!-- Стартовый экран -->
+    <div id="startScreen" class="absolute inset-0 bg-slate-900/90 z-50 flex flex-col items-center justify-center interactive transition-opacity duration-300">
+        <div id="loader" class="bg-white/90 p-6 rounded-2xl shadow-xl text-center mb-6">
+            <div class="inline-block animate-spin w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full mb-4"></div>
+            <p class="text-gray-800 font-bold">Preparing the pitch...</p>
+        </div>
+
+        <div id="rulesContainer" class="hidden bg-glass-panel rounded-3xl w-[90%] max-w-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-4 border-emerald-400/30 flex flex-col items-center justify-center p-10 text-center">
+            <h2 class="text-5xl md:text-7xl font-black text-white mb-4 tracking-tight drop-shadow-lg">Grammar<br><span class="text-emerald-400">Football</span></h2>
+            <p class="text-slate-200 text-lg md:text-xl font-medium mb-8">Choose the correct ending for the verb:<br><strong class="text-white">s / es / -</strong></p>
+            <button id="btnStart" class="w-48 md:w-64 bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-600 hover:to-emerald-500 text-white font-black py-4 rounded-xl text-2xl shadow-xl transition-transform active:scale-95 uppercase tracking-wide border-2 border-emerald-300">
+                Play
+            </button>
+        </div>
+    </div>
+
+    <!-- Финальный экран -->
+    <div id="endScreen" style="display: none;" class="absolute inset-0 bg-slate-900/95 z-50 flex-col items-center justify-center interactive transition-opacity duration-300">
+        <div class="bg-glass-panel rounded-3xl w-[90%] max-w-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-4 border-emerald-400/50 flex flex-col items-center justify-center p-10 text-center">
+            <h2 class="text-5xl md:text-7xl font-black text-white mb-2 tracking-tight drop-shadow-lg">Match Over!</h2>
+            <p class="text-xl md:text-2xl text-slate-200 font-bold mb-8">Final Score: <br><span id="finalScore" class="font-black text-emerald-400 text-6xl block mt-4 drop-shadow-md">0 / 12</span></p>
+            <button id="btnPlayAgain" class="w-48 md:w-64 bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-600 hover:to-emerald-500 text-white font-black py-4 rounded-xl text-2xl shadow-xl transition-transform active:scale-95 uppercase tracking-wide border-2 border-emerald-300">
+                Play Again
+            </button>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const scoreCorrectDisplay = document.getElementById('scoreCorrect');
+const scoreIncorrectDisplay = document.getElementById('scoreIncorrect');
+const shieldCorrect = document.getElementById('shieldCorrectContainer');
+const shieldIncorrect = document.getElementById('shieldIncorrectContainer');
+const currentWordDisplay = document.getElementById('currentWord');
+const feedbackMessage = document.getElementById('feedbackMessage');
+const wordContainer = document.getElementById('wordContainer');
+const startScreen = document.getElementById('startScreen');
+const endScreen = document.getElementById('endScreen');
+const btnStart = document.getElementById('btnStart');
+const btnRestart = document.getElementById('btnRestart');
+const btnPlayAgain = document.getElementById('btnPlayAgain');
+const loader = document.getElementById('loader');
+const rulesContainer = document.getElementById('rulesContainer');
+const finalScoreDisplay = document.getElementById('finalScore');
+
+const images = {
+    bg: new Image(),
+    ball: new Image()
+};
+let imagesLoaded = 0;
+
+function imageLoaded() {
+    imagesLoaded++;
+    if (imagesLoaded === 2) {
+        loader.classList.add('hidden');
+        rulesContainer.classList.remove('hidden');
+    }
+}
+
+images.bg.onload = imageLoaded;
+images.ball.onload = imageLoaded;
+
+images.bg.onerror = imageLoaded; 
+images.ball.onerror = imageLoaded;
+
+// Новые изображения (Фон футбольных ворот и мяч)
+images.bg.src = 'https://i.postimg.cc/htVDV5h7/b901b2d3-f554-4d88-96f6-1cc60df05cde.png';
+images.ball.src = 'https://i.postimg.cc/dVGsGxDh/Chat-GPT-Image-1-iun-2026-g-23-09-48.png';
+
+// База слов для тренировки Present Simple (ровно 12 штук)
+const vocabulary = [
+    { word: 'We read___ books.', answer: '-' },
+    { word: 'He watch___ TV.', answer: 'es' },
+    { word: 'She drink___ milk.', answer: 's' },
+    { word: 'They live___ in a house.', answer: '-' },
+    { word: 'He read___ books.', answer: 's' },
+    { word: 'I play___ football.', answer: '-' },
+    { word: 'She go___ to school.', answer: 'es' },
+    { word: 'You like___ cats.', answer: '-' },
+    { word: 'He like___ ice cream.', answer: 's' },
+    { word: 'She play___ tennis.', answer: 's' },
+    { word: 'He wash___ his hands.', answer: 'es' },
+    { word: 'She do___ her homework.', answer: 'es' }
+];
+
+let state = {
+    isRunning: false,
+    scoreCorrect: 0,
+    scoreIncorrect: 0,
+    width: 0,
+    height: 0,
+    wordQueue: [], 
+    currentWord: null,
+    hoverZone: null,
+    
+    // Параметры мяча
+    ball: {
+        x: 0, y: 0, 
+        startX: 0, startY: 0,
+        baseRadius: 90, // Размер мяча значительно увеличен
+        mode: 'idle', // 'idle', 'shooting', 'returning', 'scored'
+        targetX: 0, targetY: 0,
+        targetZone: null,
+        progress: 0 
+    },
+
+    // Зоны ворот
+    goal: {
+        x: 0, y: 0, height: 90, width: 0,
+        zones: [] 
+    }
+};
+
+let audioCtx;
+function playHitSound() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+
+    // Глухой звук удара по мячу
+    const osc = audioCtx.createOscillator();
+    const oscGain = audioCtx.createGain();
+    osc.connect(oscGain);
+    oscGain.connect(audioCtx.destination);
+
+    osc.type = 'sine';
+    // Начинаем с более низкой частоты для имитации удара по кожаному мячу
+    osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
+
+    oscGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.1);
+}
+
+function playSuccessSound() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    // Веселый короткий аккорд победы
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+    osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.1); // C#5
+    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.2); // E5
+
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+    gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5);
+
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+}
+
+function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    
+    canvas.addEventListener('mousedown', handlePointerDown);
+    canvas.addEventListener('mousemove', handlePointerMove);
+    canvas.addEventListener('touchstart', handlePointerDown, {passive: false});
+
+    btnStart.addEventListener('click', startGame);
+    btnRestart.addEventListener('click', resetGame);
+    btnPlayAgain.addEventListener('click', () => {
+        endScreen.style.display = 'none';
+        startGame();
+    });
+
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    state.width = window.innerWidth;
+    state.height = window.innerHeight;
+    canvas.width = state.width;
+    canvas.height = state.height;
+
+    // Подгоняем зону ворот: чтобы мишени не вылезали за штанги на фоновом изображении
+    state.goal.width = Math.min(state.width * 0.72, 800);
+    state.goal.height = Math.max(state.height * 0.35, 180); 
+    state.goal.x = (state.width - state.goal.width) / 2;
+    state.goal.y = state.height * 0.45; // Опустили варианты ответов ниже (было 0.30)
+    
+    const gap = 8; // Отступ между зонами
+    const zoneW = (state.goal.width - gap * 2) / 3;
+
+    // Зоны: s, es, - (Теперь все с зеленой подсветкой)
+    state.goal.zones = [
+        { id: 's', label: 's', x: state.goal.x, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' },
+        { id: 'es', label: 'es', x: state.goal.x + zoneW + gap, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' },
+        { id: '-', label: '—', x: state.goal.x + (zoneW + gap) * 2, w: zoneW, color: 'rgba(74, 222, 128, 0.2)', activeColor: 'rgba(74, 222, 128, 0.5)', neon: '#4ade80' }
+    ];
+
+    if (!state.isRunning || state.ball.mode === 'idle') {
+        resetBall();
+    }
+}
+
+function startGame() {
+    startScreen.style.opacity = '0';
+    setTimeout(() => {
+        startScreen.style.display = 'none';
+    }, 300);
+    resetGame();
+    state.isRunning = true;
+}
+
+function resetGame() {
+    state.scoreCorrect = 0;
+    state.scoreIncorrect = 0;
+    
+    state.wordQueue = [...vocabulary].sort(() => Math.random() - 0.5);
+    
+    updateScoreUI();
+    pickNextWord();
+    resetBall();
+}
+
+function resetBall() {
+    // Мяч стартует снизу по центру
+    state.ball.x = state.width / 2;
+    state.ball.y = state.height - 120;
+    state.ball.startX = state.ball.x;
+    state.ball.startY = state.ball.y;
+    state.ball.mode = 'idle';
+    state.ball.progress = 0;
+}
+
+function pickNextWord() {
+    if (state.wordQueue.length === 0) {
+        endGame();
+        return;
+    }
+    
+    state.currentWord = state.wordQueue.pop();
+    currentWordDisplay.innerText = state.currentWord.word;
+    currentWordDisplay.classList.remove('text-yellow-400'); // Сбрасываем цвет после правильного ответа
+    
+    wordContainer.classList.remove('pop-animation');
+    void wordContainer.offsetWidth; 
+    wordContainer.classList.add('pop-animation');
+}
+
+function endGame() {
+    state.isRunning = false;
+    finalScoreDisplay.innerText = `${state.scoreCorrect} / ${vocabulary.length}`;
+    endScreen.style.display = 'flex';
+}
+
+function getPointerPos(e) {
+    if (e.touches) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+}
+
+function handlePointerMove(e) {
+    if (!state.isRunning) return;
+    const pos = getPointerPos(e);
+    state.hoverZone = null;
+    
+    if (state.ball.mode === 'idle') {
+        for (let zone of state.goal.zones) {
+            if (pos.x >= zone.x && pos.x <= zone.x + zone.w && 
+                pos.y >= state.goal.y && pos.y <= state.goal.y + state.goal.height) {
+                state.hoverZone = zone.id;
+                canvas.style.cursor = 'crosshair';
+                return;
+            }
+        }
+    }
+    canvas.style.cursor = 'default';
+}
+
+function handlePointerDown(e) {
+    if (!state.isRunning || state.ball.mode !== 'idle') return;
+    const pos = getPointerPos(e);
+    
+    for (let zone of state.goal.zones) {
+        // Увеличили зону клика по вертикали, чтобы было удобнее бить по мячу
+        if (pos.x >= zone.x && pos.x <= zone.x + zone.w && pos.y < state.height * 0.85) {
+            shootBall(zone);
+            return;
+        }
+    }
+}
+
+function shootBall(zone) {
+    playHitSound();
+    state.ball.targetX = zone.x + zone.w / 2;
+    // Мяч целится в нижнюю часть ворот (снизу ответа)
+    state.ball.targetY = state.goal.y + state.goal.height - state.ball.baseRadius * 0.5; 
+    state.ball.targetZone = zone;
+    state.ball.mode = 'shooting';
+    state.ball.progress = 0;
+}
+
+function update() {
+    if (!state.isRunning) return;
+
+    const b = state.ball;
+
+    // Физика полета мяча
+    if (b.mode === 'shooting' || b.mode === 'returning') {
+        
+        if (b.mode === 'shooting') {
+            b.progress += 0.035; // Скорость полета
+            if (b.progress >= 1) {
+                b.progress = 1;
+                checkAnswer();
+            }
+        } else {
+            b.progress -= 0.05; // Возврат мяча
+            if (b.progress <= 0) {
+                b.progress = 0;
+                b.mode = 'idle';
+            }
+        }
+
+        b.x = b.startX + (b.targetX - b.startX) * b.progress;
+        
+        const basePosY = b.startY + (b.targetY - b.startY) * b.progress;
+        // Дуга полета
+        const arcHeight = 100; 
+        const arcOffset = Math.sin(b.progress * Math.PI) * arcHeight;
+        
+        b.y = basePosY - arcOffset;
+    }
+}
+
+function checkAnswer() {
+    const isCorrect = (state.ball.targetZone.id === state.currentWord.answer);
+
+    if (isCorrect) {
+        state.ball.mode = 'scored';
+        state.scoreCorrect += 1;
+        updateScoreUI();
+        triggerShieldAnimation(shieldCorrect);
+        showFeedback('GOAL!', 'text-emerald-400');
+        playSuccessSound(); // Воспроизводим звук победы
+        
+        // Отображаем собранное предложение во время паузы
+        const filledSentence = state.currentWord.word.replace('___', state.currentWord.answer === '-' ? '' : state.currentWord.answer);
+        currentWordDisplay.innerText = filledSentence;
+        currentWordDisplay.classList.add('text-yellow-400');
+        
+        // Задержка 5 секунд (5000 мс) перед следующим словом
+        setTimeout(() => {
+            resetBall();
+            pickNextWord();
+        }, 5000);
+    } else {
+        state.ball.mode = 'returning';
+        state.scoreIncorrect += 1;
+        updateScoreUI();
+        triggerShieldAnimation(shieldIncorrect);
+        showFeedback('MISS!', 'text-red-400');
+    }
+}
+
+function updateScoreUI() {
+    scoreCorrectDisplay.innerText = state.scoreCorrect;
+    scoreIncorrectDisplay.innerText = state.scoreIncorrect;
+}
+
+function triggerShieldAnimation(element) {
+    element.classList.remove('shield-bump');
+    void element.offsetWidth; 
+    element.classList.add('shield-bump');
+}
+
+function showFeedback(text, colorClass) {
+    feedbackMessage.innerText = text;
+    feedbackMessage.className = `text-4xl md:text-6xl font-black transition-all duration-300 drop-shadow-2xl text-center z-10 scale-125 opacity-100 ${colorClass}`;
+    
+    setTimeout(() => {
+        feedbackMessage.classList.remove('scale-125', 'opacity-100');
+        feedbackMessage.classList.add('scale-50', 'opacity-0');
+    }, 1000);
+}
+
+function draw() {
+    drawBackground();
+    drawGoalZones();
+    drawBall();
+}
+
+function drawBackground() {
+    if (images.bg.complete && images.bg.naturalWidth > 0) {
+        const canvasRatio = canvas.width / canvas.height;
+        const imgRatio = images.bg.width / images.bg.height;
+        let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+
+        if (canvasRatio > imgRatio) {
+            drawWidth = canvas.width;
+            drawHeight = canvas.width / imgRatio;
+            offsetY = (canvas.height - drawHeight) / 2;
+        } else {
+            drawHeight = canvas.height;
+            drawWidth = canvas.height * imgRatio;
+            offsetX = (canvas.width - drawWidth) / 2;
+        }
+        ctx.drawImage(images.bg, offsetX, offsetY, drawWidth, drawHeight);
+        
+        // Легкое затемнение
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#064e3b';
+        ctx.fillRect(0, 0, state.width, state.height);
+    }
+}
+
+function drawGoalZones() {
+    const g = state.goal;
+    
+    g.zones.forEach((zone) => {
+        ctx.save();
+        
+        const isHovered = (state.hoverZone === zone.id);
+        const padding = 4;
+        
+        // Стеклянный фон зоны (как мишени в девятках)
+        ctx.fillStyle = isHovered ? zone.activeColor : zone.color;
+        ctx.beginPath();
+        ctx.roundRect(zone.x + padding, g.y, zone.w - padding * 2, g.height, 12);
+        ctx.fill();
+        
+        // Свечение и рамка
+        ctx.shadowColor = zone.neon;
+        ctx.shadowBlur = isHovered ? 25 : 10;
+        ctx.lineWidth = isHovered ? 4 : 2;
+        ctx.strokeStyle = zone.neon;
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+
+        // Текст окончания
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = zone.neon;
+        ctx.shadowBlur = 15;
+        ctx.font = `900 ${Math.min(zone.w * 0.4, 50)}px 'Segoe UI', sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(zone.label, zone.x + zone.w / 2, g.y + g.height / 2);
+        
+        ctx.restore();
+    });
+}
+
+function drawBall() {
+    const b = state.ball;
+    
+    // Мяч остается большим на протяжении всего полета (масштаб не меняется)
+    const scale = 1.0;
+    const r = b.baseRadius * scale;
+
+    ctx.save();
+    
+    // Тень мяча
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(b.x, b.y + r*0.8, r*0.8, r*0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Отрисовка самого мяча
+    if (images.ball.complete && images.ball.naturalWidth > 0) {
+        // Вращение мяча в полете
+        ctx.translate(b.x, b.y);
+        if (b.mode === 'shooting' || b.mode === 'returning') {
+            const rotation = b.progress * Math.PI * 4; // Мяч крутится
+            ctx.rotate(rotation);
+        }
+        ctx.drawImage(images.ball, -r, -r, r * 2, r * 2);
+    } else {
+        // Запасной вариант - белый круг
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// Запуск приложения
+init();
+
+</script>
+</body>
+</html>
